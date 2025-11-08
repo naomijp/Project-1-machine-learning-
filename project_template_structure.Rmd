@@ -1,0 +1,204 @@
+---
+title: "Project 1 - Prediciting High-Risk Customers"
+author: "Group 8"
+date: "2025-11-05"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    collapsed: false
+    theme: united
+---
+# 1. Business Understanding
+The goal is to build models that classify customers as high vs low risk so the business can allocate credit responsibly, prevent losses, and target customers better. We will train at least two classification models, evaluate them, select the best, and then score new records for a final recommendation.
+
+---
+
+# 2. Explore Data
+
+```{r}
+library(readr)
+library(dplyr)
+
+credit <- read_csv("credit_28-2.csv")
+str(credit)
+summary(credit)
+colSums(is.na(credit))
+```
+
+---
+
+# 3. Data Preprocessing
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+
+# Start with a clean copy of the data
+credit_clean <- credit %>%
+  mutate(TARGET = factor(TARGET, levels = c(0, 1))) 
+
+# Look at missing values for reference
+missing_tbl <- credit_clean %>%
+  summarise(across(everything(), ~ sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "column", values_to = "n_missing") %>%
+  arrange(desc(n_missing))
+
+missing_tbl
+```
+
+*Interpretation*:
+Here I just cleaned up the dataset so it’s easier to work with later.
+I converted the TARGET variable into a factor since we’re doing classification.
+The missing value check helps me get a sense of which columns might need extra attention.
+
+
+Select variables.
+```{r}
+# Identify zero-variance columns
+nzv_cols <- credit_clean %>%
+  summarise(across(everything(), n_distinct)) %>%
+  pivot_longer(everything(), names_to = "col", values_to = "ndist") %>%
+  filter(ndist == 1) %>%
+  pull(col)
+
+nzv_cols   # so we can see what was removed
+
+# Remove zero-variance columns
+credit_clean <- credit_clean %>%
+  select(-all_of(nzv_cols))
+```
+
+*Interpretation*:
+I removed FLAG_MOBIL and FLAG_DOCUMENT_12 because they have zero variance, every row has the same value. Since they don’t provide any information that helps the model predict the target, keeping them would only add noise and slow things down. Removing them keeps the dataset cleaner and focused on variables that actually matter.
+
+---
+
+# 4. Training-Validation Split
+
+```{r}
+set.seed(123)
+
+# Split the data (80/20, stratified)
+credit_split <- initial_split(credit_clean, prop = 0.80, strata = TARGET)
+credit_train <- training(credit_split)
+credit_valid <- testing(credit_split)
+
+# Set up the recipe here (clean and organized)
+credit_recipe <- recipe(TARGET ~ ., data = credit_train) %>%
+  step_impute_median(all_numeric_predictors()) %>%    # fill numeric NA
+  step_impute_mode(all_nominal_predictors()) %>%      # fill categorical NA
+  step_dummy(all_nominal_predictors(), one_hot = TRUE)
+
+credit_prep <- prep(credit_recipe)
+
+train_df <- bake(credit_prep, new_data = credit_train)
+valid_df <- bake(credit_prep, new_data = credit_valid)
+
+train_counts <- table(train_df$TARGET)
+valid_counts <- table(valid_df$TARGET)
+
+train_counts; valid_counts
+```
+
+*Interpretation*:
+I used an 80/20 split to give the model plenty of training data while still keeping a clean hold-out set for evaluation. Stratifying by the target keeps the high-risk vs low-risk ratio consistent between training and validation, so the model isn’t tested on a skewed sample. Baking the recipe here makes sure both sets use the exact same preprocessing.
+
+---
+
+# 5. Model 1 (Logistic Regression)
+
+## 5.1 Model 1 Predictions
+
+```{r}
+model1_spec <- logistic_reg(mode = "classification") %>%
+  set_engine("glm")
+
+# Fit the model
+model1_fit <- model1_spec %>%
+  fit(TARGET ~ ., data = train_df)
+
+# Predictions (probabilities + predicted class)
+model1_pred <- bind_cols(
+  predict(model1_fit, valid_df, type = "prob"),
+  predict(model1_fit, valid_df, type = "class")
+) %>%
+  bind_cols(valid_df %>% select(TARGET)) %>%
+  rename(actual = TARGET, pred_class = .pred_class)
+```
+
+*Interpretation*:
+After fitting the logistic regression model on the training data, I generated both probability predictions and hard class predictions for the validation set. These predictions will be used to judge how well the model is doing.
+
+---
+
+## 5.2 Model 1 Evaluation
+
+```{r}
+library(yardstick)
+library(ggplot2)
+
+# Confusion matrix + accuracy
+model1_cm  <- conf_mat(model1_pred, truth = actual, estimate = pred_class)
+model1_acc <- accuracy(model1_pred, truth = actual, estimate = pred_class)
+
+model1_cm
+model1_acc
+
+# ROC curve + AUC (use probability of positive class)
+model1_roc <- roc_curve(model1_pred, truth = actual, .pred_1)
+model1_auc <- roc_auc(model1_pred, truth = actual, .pred_1)
+
+model1_auc
+autoplot(model1_roc)
+```
+
+
+*Interpretation*:
+To evaluate the model’s performance, I looked at accuracy, the confusion matrix, and the ROC/AUC metrics. Accuracy shows the percentage of correct predictions, while the confusion matrix breaks down how many high-risk customers were correctly identified. The ROC curve and AUC score show how well the model separates high-risk from low-risk customers.
+
+---
+
+# 6. Model 2
+
+## 6.1 Model 2 Predictions
+
+Train Model 2 and generate predictions on the validation data.
+
+```{r}
+# Model 2 training and predictions code goes here
+```
+
+*Interpretation*: Similar to Model 1, describe the second model's predictions: "Model 2 is similar to the first, but it uses a different approach to predict the outcome. We are comparing how each model performs."
+
+---
+
+## 6.2 Model 2 Evaluation
+
+Evaluate Model 2 using appropriate metrics (e.g., accuracy, ROC, confusion matrix).
+
+```{r}
+# Model 2 evaluation code goes here
+```
+
+*Interpretation*: Compare Model 2's results with those of Model 1. "Model 2's performance is slightly better than Model 1, as indicated by a higher accuracy or a better ROC curve. This suggests that Model 2 may be more suited to predicting the outcome accurately."
+
+---
+
+# 7. Final Prediction
+
+Combine the results from Model 1 and Model 2 to make a final prediction or decision.
+
+```{r}
+# Final prediction code goes here
+```
+
+*Interpretation*: Describe how you combine the models' results and what the final prediction means: "By combining the predictions from both models, we have a stronger prediction. This final model provides a recommendation on whether a customer will make a purchase, based on all available data."
+
+---
+
+*Notes:*
+- Ensure that each model and result is interpreted in business-friendly terms.
+- After each model evaluation, summarise the results, comparing them in plain language to help stakeholders understand the implications.
+- Whenever presenting evaluation metrics like accuracy or ROC, explain what they mean in simple terms. For instance: "An accuracy of 80% means that 80% of the time, the model made the correct prediction."
+- Some models may require additional preprocessing. INclude them as needed.
