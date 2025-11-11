@@ -1,0 +1,467 @@
+---
+title: "Project 1 kNN risk analysis"
+author: "Naomi Pena"
+date: "2025-11-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+library(caret)
+library(car)
+library(FNN)
+library(ROCR)
+library(pROC)
+library(ggplot2)
+library(ROSE)
+library(janitor)
+library(dplyr)
+
+```
+
+
+```{r dataset}
+credit_info <- read.csv("credit_28.csv", header = TRUE)
+
+
+```
+Remove unneecessary variables
+
+```{r Load data}
+credit_info <- credit_info[, -c(1, 13, 22, 25, 27, 29, 33, 34, 41, 43:62)]
+
+names(credit_info)
+```
+
+convert catagorical features 
+```{r convert}
+# Recode binary categorical variables
+credit_info$CODE_GENDER <- ifelse(credit_info$CODE_GENDER == "M", 0,
+                           ifelse(credit_info$CODE_GENDER == "F", 1, NA))
+
+# Recode car owner
+credit_info$FLAG_OWN_CAR <- ifelse(credit_info$FLAG_OWN_CAR == "Y", 1, 0)
+credit_info$FLAG_OWN_REALTY <- ifelse(credit_info$FLAG_OWN_REALTY == "Y", 1, 0)
+
+# Recode NAME_CONTRACT_TYPE
+credit_info <- cbind(
+  credit_info,
+  model.matrix(~ NAME_CONTRACT_TYPE - 1, data = credit_info)
+)
+credit_info$NAME_CONTRACT_TYPE <- NULL
+
+
+unique(credit_info$NAME_INCOME_TYPE)
+unique(credit_info$NAME_EDUCATION_TYPE)
+unique(credit_info$NAME_FAMILY_STATUS)
+unique(credit_info$NAME_HOUSING_TYPE)
+
+## re code income type ##
+income_dummies <- model.matrix(~ NAME_INCOME_TYPE - 1, data = credit_info)
+credit_info <- cbind(credit_info, income_dummies)
+credit_info$NAME_INCOME_TYPE <- NULL
+
+## re coding name housing type ##
+housing_dummies <- model.matrix(~ NAME_HOUSING_TYPE - 1, data = credit_info)
+credit_info <- cbind(credit_info, housing_dummies)
+credit_info$NAME_HOUSING_TYPE <- NULL
+
+## re code education type ##
+edu_dummies <- model.matrix(~ NAME_EDUCATION_TYPE - 1, data = credit_info)
+credit_info <- cbind(credit_info, edu_dummies)
+credit_info$NAME_EDUCATION_TYPE <- NULL
+
+## re code Family status ##
+family_dummies <- model.matrix(~ NAME_FAMILY_STATUS - 1, data = credit_info)
+credit_info <- cbind(credit_info, family_dummies)
+credit_info$NAME_FAMILY_STATUS <- NULL
+
+## add in suggested calculations
+credit_info$INCOME_CREDIT_RATIO <- credit_info$AMT_INCOME_TOTAL / credit_info$AMT_CREDIT
+
+# Annuity-Income Ratio
+credit_info$ANNUITY_INCOME_RATIO <- credit_info$AMT_ANNUITY / credit_info$AMT_INCOME_TOTAL
+
+# Credit as Percentage of Income (same as income-credit ratio but inverted)
+credit_info$CREDIT_INCOME_PERCENT <- (credit_info$AMT_CREDIT / credit_info$AMT_INCOME_TOTAL) * 100
+
+# Percentage of Days Employed relative to Age
+credit_info$PERCENT_DAYS_EMPLOYED <- (credit_info$DAYS_EMPLOYED / credit_info$DAYS_BIRTH) * 100
+
+# Income per Person in the Household
+credit_info$INCOME_PER_PERSON <- credit_info$AMT_INCOME_TOTAL / credit_info$CNT_FAM_MEMBERS
+
+
+```
+
+Look at the variables and new order
+
+```{r variables}
+names(credit_info)
+
+t(t(names(credit_info)))
+str(credit_info)
+table(credit_info$TARGET)
+nrow(credit_info)
+
+credit_info_cleaned <- credit_info %>%
+  clean_names()
+
+names(credit_info_cleaned)
+
+credit_info_cleaned <- credit_info_cleaned %>%
+  mutate(across(where(is.numeric), ~ ifelse(is.infinite(.), NA, .)))
+
+credit_info_cleaned$target <- factor(credit_info_cleaned$target, levels = c("0", "1"))
+
+```
+
+Set House as factor
+```{r Factor}
+credit_info_cleaned$target <- as.factor(credit_info_cleaned$target)
+
+```
+
+Training-Validation split
+```{r training and validation}
+set.seed(666)
+### AI ADDITION BEGEN
+
+train_index <- caret::createDataPartition(credit_info_cleaned$target, p = 0.7, list = FALSE)
+
+train_df <- credit_info_cleaned[train_index, ]
+valid_df <- credit_info_cleaned[-train_index, ]
+
+all_cols <- names(train_df)
+id_target_cols <- c("sk_id_curr", "target")
+
+binary_cols <- all_cols[sapply(train_df, function(col) {
+  is.numeric(col) && all(na.omit(col) %in% c(0, 1))
+})]
+
+exclude_cols <- unique(c(id_target_cols, binary_cols))
+
+process_cols <- setdiff(all_cols, exclude_cols)
+
+### AI ADDITION END
+
+train_index <- sample(1:nrow(credit_info_cleaned), 0.7 * nrow(credit_info_cleaned))
+valid_index <- setdiff(1:nrow(credit_info_cleaned), train_index)
+
+train_df <- credit_info_cleaned[train_index, ]
+valid_df <- credit_info_cleaned[valid_index, ]
+
+nrow(train_df)
+nrow(valid_df)
+
+t(t(names(train_df)))
+
+head(train_df)
+head(valid_df)
+
+str(train_df)
+str(valid_df)
+```
+
+create new record for a new customer
+```{r new customer}
+Customer_1 <- data.frame(sk_id_curr = 999999,
+                                  code_gender = 1, 
+                                  flag_own_car = 0,
+                                  flag_own_realty = 1,
+                                  cnt_children = 0,
+                                  amt_income_total = 200000.0,
+                                  amt_credit = 600000.0,
+                                  amt_annuity = 25000.0,
+                                  amt_goods_price = 600000.0,
+                                  days_birth = -12000, # Approx 33 years old days_employed = -450, # Employed for ~1.2 years
+                                  days_employed = -450,
+                                  days_registration = -3000,
+                                  days_id_publish = -1000,
+                                  flag_mobil = 1,
+                                  flag_emp_phone = 1,
+                                  flag_cont_mobile = 1,
+                                  flag_email = 0,
+                                  cnt_fam_members = 1,
+                                  region_rating_client = 2,
+                                  region_rating_client_w_city = 2,
+                                  reg_region_not_live_region = 0,
+                                  reg_region_not_work_region = 0,
+                                  live_region_not_work_region = 0,
+                                  reg_city_not_live_city = 0,
+                                  reg_city_not_work_city = 0,
+                                  live_city_not_work_city = 0,
+                                  days_last_phone_change = -500,
+                                  amt_req_credit_bureau_hour = 0,
+                                  amt_req_credit_bureau_day = 0,
+                                  amt_req_credit_bureau_week = 0,
+                                  amt_req_credit_bureau_mon = 0,
+                                  amt_req_credit_bureau_qrt = 0,
+                                  amt_req_credit_bureau_year = 1,
+                                  name_contract_type_cash_loans = 1,
+                                  name_contract_type_revolving_loans = 0,
+                                  name_income_type_businessman = 0,
+                                  name_income_type_commercial_associate = 1,
+                                  name_income_type_pensioner = 0,
+                                  name_income_type_state_servant = 0,
+                                  name_income_type_unemployed = 0,
+                                  name_income_type_working = 0,
+                                  name_housing_type_co_op_apartment = 1,
+                                  name_housing_type_house_apartment = 0,
+                                  name_housing_type_municipal_apartment = 0,
+                                  name_housing_type_office_apartment = 0,
+                                  name_housing_type_rented_apartment = 0,
+                                  name_housing_type_with_parents = 0,
+                                  name_education_type_academic_degree = 0,
+                                  name_education_type_higher_education = 1,
+                                  name_education_type_incomplete_higher = 0,
+                                  name_education_type_lower_secondary = 0,
+                                  name_education_type_secondary_secondary_special = 0,
+                                  name_family_status_civil_marriage = 0,
+                                  name_family_status_married = 1,
+                                  name_family_status_separated = 0,
+                                  name_family_status_single_not_married = 0,
+                                  name_family_status_widow = 0,
+                                  income_credit_ratio = 0.135,
+                                  annuity_income_ratio = 0.230,
+                                  credit_income_percent = 200,
+                                  percent_days_employed = 2.53,
+                                  income_per_person = 60500
+                                  ) 
+Customer_1
+
+```
+
+
+Normalization
+```{r norm}
+train_norm <- train_df
+valid_norm <- valid_df
+
+names(train_df)
+
+
+norm_values <- preProcess(train_df[, -c(2)],
+                          method = c("center",
+                                     "scale"))
+train_norm[, -c(2)] <- predict(norm_values,
+                                train_df[, -c(2)])
+
+head(train_norm)
+
+valid_norm[, -c(2)] <- predict(norm_values,
+                                valid_df[, -c(2)])
+
+head(valid_norm)
+
+
+
+### AI ADDITION
+
+norm_values <- preProcess(train_df[, process_cols],
+                          method = c("medianImpute", "center", "scale"))
+
+train_norm <- train_df
+valid_norm <- valid_df
+
+train_norm[, process_cols] <- predict(norm_values, train_df[, process_cols])
+
+valid_norm[, process_cols] <- predict(norm_values, valid_df[, process_cols])
+
+knn_model <- caret::knn3(target ~ . - sk_id_curr, data = train_norm, k = 5)
+
+knn_pred_train <- predict(knn_model, newdata = train_norm[, -c(which(names(train_norm) == "target"), 
+                                                               which(names(train_norm) == "sk_id_curr"))],
+                          type = "class")
+head(knn_pred_train)
+
+colSums(is.na(train_norm[, process_cols]))
+
+### AI ADDITION
+
+## NOT YET PREDICTED ## BUILD NEW CUSTOMER DF FIRST ###
+Customer_1 <- predict(norm_values, Customer_1)
+Customer_1
+
+names(Customer_1)
+
+```
+
+Data balancing
+```{r balance}
+data_balanced_train <- ROSE(target ~ . - sk_id_curr, 
+                            data = train_norm, 
+                            seed = 666)$data
+table(data_balanced_train$target)
+
+```
+
+Train kNN models
+```{r kNN models}
+knn_model_5 <- caret::knn3(target ~ . - sk_id_curr, data = data_balanced_train, k = 5)
+knn_model_5
+
+knn_model_7 <- caret::knn3(target ~ ., data = train_norm, k = 7)
+knn_model_7
+
+knn_model_11 <- caret::knn3(target ~ ., data = train_norm, k = 11)
+knn_model_11
+
+knn_model_3 <- caret::knn3(target ~ ., data = train_norm, k = 3)
+knn_model_5
+
+```
+
+kNN = 5
+```{r k = 5}
+
+#The prediction, train
+knn_pred_train_5 <- predict(knn_model_5, newdata = train_norm[, -c(2)],
+                          type = "class")
+head(knn_pred_train_5)
+
+confusionMatrix(knn_pred_train_5, as.factor(train_norm[, 2]))
+
+
+# The prediction, valid
+knn_pred_valid_5 <- predict(knn_model_5, newdata = valid_norm[, -c(2)],
+                          positive = "1")
+head(knn_pred_valid_5)
+
+confusionMatrix(knn_pred_valid_5, as.factor(valid_norm[, 2]))
+
+confusionMatrix(knn_pred_valid_5, 
+                valid_norm$target,  # This is easier to read than valid_norm[, 2]
+                positive = "1")
+
+
+#Customer classification and prob
+Customer_1_Class5 <- predict(knn_model_5, 
+                             newdata = Customer_1,
+                             type = "class")
+Customer_1_Class5
+
+names(Customer_1)
+
+Customer_1_Prob5 <- predict(knn_model_5, 
+                            newdata = Customer_1,
+                            type = "prob")
+Customer_1_Prob5
+
+```
+
+
+
+kNN = 7
+```{r k = 7}
+
+
+#The prediction, train
+knn_pred_train_7 <- predict(knn_model_7, newdata = train_norm[, -c(2)],
+                          type = "class")
+head(knn_pred_train_7)
+
+confusionMatrix(knn_pred_train_7, as.factor(train_norm[, 2]))
+
+
+#the prediction, valid
+knn_pred_valid_7 <- predict(knn_model_7, newdata = valid_norm[, -c(2)],
+                          type = "class")
+head(knn_pred_valid_7)
+
+confusionMatrix(knn_pred_valid_7, as.factor(valid_norm[, 2]))
+
+
+#Customer classification and prob
+Customer_1_Class7 <- predict(knn_model_7, 
+                             newdata = Customer_1,
+                             type = "class")
+Customer_1_Class7
+
+Customer_1_prob7 <- predict(knn_model_7, 
+                            newdata = Customer_1,
+                            type = "prob")
+Customer_1_prob7
+
+
+```
+
+kNN = 11
+```{r k = 11}
+
+
+#The prediction, train
+knn_pred_train_11 <- predict(knn_model_11, newdata = train_norm[, -c(2)],
+                          type = "class")
+head(knn_pred_train_11)
+
+confusionMatrix(knn_pred_train_11, as.factor(train_norm[, 2]))
+
+
+#the prediction, valid
+knn_pred_valid_11 <- predict(knn_model_11, newdata = valid_norm[, -c(2)],
+                          type = "class")
+head(knn_pred_valid_11)
+
+confusionMatrix(knn_pred_valid_11, as.factor(valid_norm[, 2]))
+
+
+#Customer classification and prob
+Customer_1_Class11 <- predict(knn_model_11, 
+                             newdata = Customer_1,
+                             type = "class")
+Customer_1_Class11
+
+Customer_1_prob11 <- predict(knn_model_11, 
+                            newdata = Customer_1,
+                            type = "prob")
+Customer_1_prob11
+
+
+```
+
+
+
+kNN = 3
+```{r k = 3}
+
+
+#The prediction, train
+knn_pred_train_3 <- predict(knn_model_3, newdata = train_norm[, -c(2)],
+                          type = "class")
+head(knn_pred_train_3)
+
+confusionMatrix(knn_pred_train_3, as.factor(train_norm[, 2]))
+
+
+#the prediction, valid
+knn_pred_valid_3 <- predict(knn_model_3, newdata = valid_norm[, -c(2)],
+                          type = "class")
+head(knn_pred_valid_3)
+
+confusionMatrix(knn_pred_valid_3, as.factor(valid_norm[, 2]))
+
+
+#Customer classification and prob
+Customer_1_Class3 <- predict(knn_model_3, 
+                             newdata = Customer_1,
+                             type = "class")
+Customer_1_Class3
+
+Customer_1_prob3 <- predict(knn_model_3, 
+                            newdata = Customer_1,
+                            type = "prob")
+Customer_1_prob3
+
+```
+
+## ROC CURVES
+```{r k = 3}
+ROSE::roc.curve(valid_norm$target, knn_pred_valid_3)
+ROSE::roc.curve(valid_norm$target, knn_pred_valid_5)
+ROSE::roc.curve(valid_norm$target, knn_pred_valid_7)
+ROSE::roc.curve(valid_norm$target, knn_pred_valid_11)
+
+
+```
+
