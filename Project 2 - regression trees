@@ -1,0 +1,276 @@
+
+---
+title: "project 2: Fantastic houses"
+author: "Naomi & Tsedeneya"
+date: "12/5/25"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    collapsed: false
+    theme: united
+---
+#libraries
+```{r}
+library(rpart)
+library(rpart.plot)
+library(forecast)
+library(caret)
+library(dplyr)
+library(randomForest)
+library(corrplot)
+```
+
+# 1. Load Data
+
+In this section, we will load the dataset required for the analysis.
+
+```{r}
+hoouse <- read.csv("house_17.csv")
+hoouse_newRecord <- read.csv("house_test_17.csv")
+
+str(hoouse)
+names(hoouse)
+nrow(hoouse)
+
+```
+
+*Interpretation*: Once the data is loaded, ensure to examine its structure to ensure everything is in order before moving forward. Explain briefly what each dataset column represents, using layman's terms where necessary. For example: "This dataset includes customer data such as age, income, and purchase behaviour."
+
+*Naomi* : The data covers homes sold between 2014 and 2015. This data set includes the following:
+1. Price - the dollar amount the house sold for. This is the variable our model will try to predict.
+2. bedrooms & bathrooms - the count of Bedrooms and Bathrooms 
+3. sqft_living - The size of the actual interior living space in square feet
+4. sqft_lot - The size of the land the house sits on
+5. floors - The number of levels in the house
+6. waterfront - House which has a view to a waterfront view. 0 = no; 1 = yes
+7. view - The number of times it has been viewed at the point of data collection
+8. condition -  How good the condition is (Overall). Sale of 1:5/ 5 is very good
+9. grade - overall grade given to the housing unit, based on King County grading system. The higher the better
+10. sqft_above - square footage of house apart from basement
+11. sqft_basement - square footage of the basement
+12. yr_built - year built
+13. yr_renovated - Year when house was renovated
+14. zipcode - zip code where house is located 
+15. lat - latitude coordinate
+16. long - longitude coordinate
+17. id - A unique reference number for the specific sale. It has no value for predicting price.
+18. data columns (Year, Month, Day) - When the sale happened.
+
+overall, The dataset is structured with a continuous numeric target variable, price, which allows a regression tree to predict specific home values by minimizing variance rather than classifying them into bins. While continuous predictors like sqft_living are ready for analysis, categorical variables such as zipcode are currently stored as integers and must be converted to factors to ensure the tree splits based on distinct locations rather than numerical magnitude.  
+
+---
+
+# 2. Explore Data
+
+Explore the data to understand its structure, summary statistics, and any potential issues with missing values or outliers.
+```{r}
+# Explore data code goes here
+head(hoouse, 10)
+summary(hoouse)
+
+hist(hoouse_cleaning$price,                            # Since I am doing regression, i need need to see if Price is skewed
+     main = "Distribution of House Prices", 
+     xlab = "Price ($)", 
+     col = "lightblue", 
+     breaks = 50)
+
+hist(hoouse_cleaning$log_price,                            # take log to fix skew
+     main = "Distribution of House Prices", 
+     xlab = "Price ($)", 
+     col = "lightblue", 
+     breaks = 50)
+
+```
+*Interpretation*: During exploration, check for any missing or outlier values. For instance, you might find that some customers have missing data on their age or income. Explain this clearly: "Some rows are missing data, which could be due to customers opting not to provide this information."
+
+*head, summary, and is.na explanation*
+head: price, is continuous, necessitating a regression tree, and displays a mix of continuous predictors (like sqft_living) and ordinal features encoded as integers (like grade and condition). Additionally, it highlights that temporal data is already parsed into integer columns (Year, Month, Day) and reveals zero-inflated variables like sqft_basement and yr_renovated, which decision trees can effectively split on without complex preprocessing.
+
+Summary: the data appears to be complete with no missing values reported for any variable, as indicated by the absence of "NA's" counts. However, significant outliers are present, particularly a property with 33 bedrooms and extreme maximum values in price (7.7 million) and sqft_lot (over 1.1 million) that skew far from their medians
+
+*histogram explanation*
+1. Extreme Right Skew (Positive Skew): The chart is not a symmetric bell curve. Instead, it has a tall peak on the left and a very long "tail" stretching to the right. This means the vast majority of houses in the dataset are on the lower end of the price spectrum (likely under 1 million), while the "tail" represents a small number of ultra-expensive luxury homes (up to nearly $8 million).
+2. The "Average" is Misleading: Because of this skew, the Mean (average) price will be significantly higher than the Median (typical) price. The few multi-million dollar homes pull the average up, making the "average" house price look more expensive than what a typical buyer actually pays.
+3. Conclusion: the long tail and outliers are not a concern for regression trees as they are generally robust to outliers and skewed distributions. The tree will simply create specific "branches" to handle those high-value homes separately from the rest. Consequently, we do not need to transform the target variable.
+
+
+---
+
+# 3. Data Preprocessing
+
+Perform data cleaning, such as handling missing values, transforming variables, or creating new features.
+```{r}
+# Data preprocessing code goes here
+
+#Remove ID, X, day
+hoouse_cleaning <- hoouse[, -c(1, 2 , 5)]
+names(hoouse_cleaning)
+
+#account for skewed prices
+hoouse_cleaning <- hoouse_cleaning %>%
+  mutate(log_price = log(price))
+
+#has renovation(1 = Yes, 0 = No)
+hoouse_cleaning <- hoouse_cleaning %>%
+  mutate(
+    has_renovation = ifelse(yr_renovated > 0, 1, 0))
+
+#remove 33 bedroom error row
+hoouse_cleaning <- hoouse_cleaning %>% 
+  filter(bedrooms != 33)
+
+#house age
+hoouse_cleaning <- hoouse_cleaning %>%
+  mutate(house_age = 2015 - yr_built) ###edit
+
+# Remove the yr_built column
+hoouse_cleaning <- hoouse_cleaning %>%
+  select(-yr_built)
+
+#Remove zipcode
+hoouse_cleaning <- hoouse_cleaning %>%
+  select(-zipcode) 
+
+##############################################################################################
+
+
+
+#for new record
+#Remove ID, X, day
+hoouse_newRecord <- hoouse_newRecord[, -c(1, 2 , 5)]
+names(hoouse_newRecord)
+
+#has renovation(1 = Yes, 0 = No)
+hoouse_newRecord <- hoouse_newRecord %>%
+  mutate(
+    has_renovation = ifelse(yr_renovated > 0, 1, 0))
+
+#house age
+hoouse_newRecord <- hoouse_newRecord %>%
+  mutate(house_age = 2015 - yr_built)
+
+# Remove the yr_built column
+hoouse_newRecord <- hoouse_newRecord %>%
+  select(-yr_built)
+
+#Remove zipcode
+hoouse_newRecord <- hoouse_newRecord %>%
+  select(-zipcode)
+
+```
+*Interpretation*: After cleaning the data, describe the changes you made, for example, replacing missing values with the mean or removing outliers. Always provide simple, clear explanations like: "We replaced missing values in the 'Age' column with the average age because it ensures our model has complete data to work with."
+
+Factorize zipcode: Why do this? In a regression tree, keeping zipcode as a number implies that zip code 98002 is "greater than" 98001. Converting it to a factor allows the tree to group specific zip codes together (e.g., "if zipcode is in {98004, 98039, 98040}") to better identify high-value areas.
+
+house age: I used 2015 as the reference year because the dataset documentation notes that homes were sold between May 2014 and May 2015. "Age" is often more interpretable for a client like Jacob Kawalski than the raw year.
+
+remove 33 bedroom row: the Square footage of this house is only 1600 feet which indicates it is a data entry error meant to be 3, including such an extreme outlier can distort the regression tree's splitting logic, forcing the model to create specific rules for this anomaly rather than learning generalization patterns for typical home prices.
+
+has renovation: The previous variable used 0 to indicate no renovation, which the model implies is numerically "older" than any actual year, creating a misleading mathematical gap. converting this to a binary variable allows the tree to distinctly split data based on the presence of improvements, rather than getting confused by the arbitrary numerical difference between 0 and 2015.
+
+remove ID, X, and DAY: I removed id and X because they are unique identifiers or row indices rather than characteristics of the house, meaning they hold no predictive power for determining market value. Including these identifiers can dangerously mislead the regression tree into "memorizing" specific rows (overfitting) instead of learning generalizable rules that apply to new data. Finally, the day variable was removed because while the year or month can capture market trends and seasonality, the specific calendar day of the sale (e.g., the 12th vs. the 13th) is essentially random noise.
+
+Select variables.
+```{r}
+# variable selection
+
+
+hoouse_ready <- hoouse_cleaning
+```
+*Interpretation*: Provide a rationale on why you selected these variables. These
+could be based on domain/common knowledge, research, etc.
+
+---
+
+# 4. Training-Validation Split
+
+Split the data into training and validation sets to evaluate the model's performance.
+
+```{r}
+# Training-validation split code goes here
+
+set.seed(666)
+
+
+train_index <- sample(1:nrow(hoouse_ready), 0.6 * nrow(hoouse_ready))
+valid_index <- setdiff(1:nrow(hoouse_ready), train_index)
+
+train_df <- hoouse_ready[train_index, ]
+valid_df <- hoouse_ready[valid_index, ]
+nrow(train_df)
+
+```
+# 7. Final Prediction
+
+Combine the results from Model 1 and Model 2 to make a final prediction or decision.
+
+```{r}
+# Final prediction code goes here
+regress_tr_pred <- predict(regress_tree_log, newdata = hoouse_newRecord)
+regress_tr_pred
+
+# Assuming your vector of results is named 'predictions'
+real_dollar_prices <- exp(regress_tr_pred)
+
+# View the first few in Dollars
+head(real_dollar_prices, 20)
+
+
+
+```
+
+*Interpretation*: Explain the reasoning behind splitting the data. For example: "We are separating the data into two parts: training data to build the model and validation data to evaluate its performance. This ensures our model can generalise well to new, unseen data."
+
+---
+
+# 5. Model 1
+
+## 5.1 Model 1 Predictions
+
+Train Model 1 and generate predictions on the validation data.
+
+```{r}
+# Model 1 training and predictions code goes here
+
+regress_tree_log <- rpart(log_price ~ Year + Month + day_of_week + bedrooms 
+                      + bathrooms + sqft_living + sqft_lot + floors
+                      + waterfront + view + condition + grade + sqft_above
+                      + sqft_basement + house_age + yr_renovated + lat 
+                      + long + has_renovation + house_age,
+                      data = train_df,
+                      method = "anova",
+                      control = rpart.control(cp = 0.001)) 
+
+
+# Plot the tree
+rpart.plot(regress_tree_log, type = 4, digits = -3)
+
+```
+
+*Interpretation*: Once the model is trained, explain its predictions in clear terms: "Our model is now predicting outcomes based on the features we provided. For instance, it might predict whether a customer will purchase a product based on their age and income."
+
+---
+
+## 5.2 Model 1 Evaluation
+
+Evaluate Model 1 using appropriate metrics (e.g., accuracy, ROC, confusion matrix).
+
+```{r}
+# Model 1 evaluation code goes here
+# add training set
+
+# 1. Make predictions (these will be in log units)
+log_predictions <- predict(regress_tree_log, valid_df)
+log_predictions_train <- predict(regress_tree_log, train_df)
+# 2. Convert back to Dollar amounts
+actual_dollar_predictions <- exp(log_predictions)
+actual_dollar_predictions_train <- exp(log_predictions_train)
+
+# 3. Calculate Accuracy using the Real Dollar amounts
+# Compare converted predictions against the original valid_df$price
+accuracy(actual_dollar_predictions, valid_df$price)
+accuracy(actual_dollar_predictions_train, train_df$price)
+
+
+```
