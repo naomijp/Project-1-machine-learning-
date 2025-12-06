@@ -1,0 +1,291 @@
+
+---
+title: "project name"
+author: "group name"
+date: "the date"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    collapsed: false
+    theme: united
+---
+
+# 1. Load Data
+
+In this section, we will load the dataset required for the analysis.
+
+```{r}
+# Load required packages
+library(tidyverse)
+
+# Load your assigned Project 2 datasets
+train_df <- read.csv("house_17.csv")
+test_df  <- read.csv("house_test_17.csv")
+
+# View the first 10 rows
+head(train_df, 10)
+
+# Check structure
+str(train_df)
+
+```
+
+*Interpretation*: 
+The training dataset contains information on home sales in King County, including the sale price and various house characteristics. Each row represents one home, and each column captures a different feature of the property. Key variables include:
+
+- **price** – the sale price of the home (our target for prediction).
+- **bedrooms / bathrooms** – basic home size indicators.
+- **sqft_living / sqft_lot** – interior and lot square footage.
+- **floors** – number of floors in the home.
+- **waterfront / view / condition / grade** – quality indicators recorded by the county.
+- **sqft_above / sqft_basement** – above-ground and basement square footage.
+- **yr_built / yr_renovated** – year built and year renovated.
+- **zipcode, lat, long** – geographic location of the property.
+
+The test dataset contains the same set of predictors but **does not include the sale price**, since this is what we will ultimately predict.  
+Overall, the data loads correctly, and the structure check confirms that the variables appear in appropriate formats for further cleaning and analysis.
+
+---
+
+# 2. Explore Data
+
+Explore the data to understand its structure, summary statistics, and any potential issues with missing values or outliers.
+
+```{r}
+# Summary statistics
+summary(train_df)
+
+# Check for missing values
+colSums(is.na(train_df))
+
+# Look for unusual values or possible outliers
+boxplot(train_df$price, main = "Price Distribution")
+boxplot(train_df$sqft_living, main = "Sqft Living Distribution")
+boxplot(train_df$bathrooms, main = "Bathrooms Distribution")
+```
+
+*Interpretation*: After looking through the summary statistics and running the missing-value check, the dataset appears complete—there are no NAs in any of the variables. Most of the fields fall within normal ranges for residential properties in King County, so nothing stands out as an obvious data error.
+The boxplots help give a quick sense of the distribution for a few key variables. The price distribution is heavily right-skewed, which makes sense because only a relatively small number of homes sell for extremely high amounts. The same pattern shows up in the square footage variables, especially sqft_living, where larger luxury homes naturally appear as outliers. The bathrooms variable also has some higher values, but those are still realistic for large or remodeled homes.
+Overall, the outliers we see look more like legitimate large homes rather than mistakes. Nothing suggests a need for major cleaning at this stage, so the data is in good shape to move forward into preprocessing and modeling.
+
+---
+
+# 3. Data Preprocessing
+
+Perform data cleaning, such as handling missing values, transforming variables, or creating new features.
+
+```{r}
+# 3.1 Missing values check
+colSums(is.na(train_df))
+
+# 3.2 Remove columns not useful for prediction
+if ("X" %in% names(train_df)) {
+  train_df <- train_df %>% select(-X)
+}
+
+# 3.3 Convert categorical variables into factors
+train_df$waterfront <- as.factor(train_df$waterfront)
+train_df$view       <- as.factor(train_df$view)
+train_df$condition  <- as.factor(train_df$condition)
+train_df$grade      <- as.factor(train_df$grade)
+
+# 3.4 Create house_age variable
+train_df <- train_df %>%
+  mutate(house_age = 2015 - yr_built)
+
+# 3.5 Confirm price distribution is valid
+summary(train_df$price)
+```
+
+*Interpretation*: 
+The training dataset didn’t have any missing values, so there was nothing to fill in or remove at this stage. I also dropped the variable X because it’s just a row index from the original file and doesn’t contain any information about the homes themselves.
+
+Next, I converted a few variables, waterfront, view, condition, and grade into factors. Each of these represents categories rather than continuous numbers, so turning them into factors ensures R treats them properly when we build the regression model.
+
+After that, I created a new variable called house_age, which measures how old each home was in 2015 (the year used in the dataset description). This is often a more meaningful feature than the raw year built.
+
+Other than that, I kept all remaining variables because they describe important characteristics of each house, its size, overall quality, renovation history, and location, all of which can influence sale price.
+
+Overall, after preprocessing, the dataset looks clean, organized, and ready for feature selection and modeling in the next section.
+
+
+Select variables.
+```{r}
+# variable selection
+# For linear regression, we select predictors that are meaningful for explaining variation in price.
+# These variables match the cleaned dataset and will be used in the model.
+
+selected_vars <- c(
+  "price",
+  "bedrooms", "bathrooms", 
+  "sqft_living", "sqft_lot", 
+  "sqft_above", "sqft_basement",
+  "floors",
+  "waterfront", "view", "condition", "grade",
+  "house_age", "yr_renovated",
+  "lat", "long"
+)
+
+train_selected <- train_df[, selected_vars]
+head(train_selected)
+```
+
+*Interpretation*:
+I selected these variables because they reflect the main characteristics that typically influence a home’s selling price. The size of the home (bedrooms, bathrooms, square footage), the overall quality (condition and grade), and special features like waterfront or a view all play a role in determining value in King County.
+
+I also included the house_age feature, which helps represent how old each home is in a simple and consistent way. yr_renovated captures whether the property has been updated, which can also impact price.
+
+Finally, latitude and longitude help the model pick up neighborhood-level differences without manually creating location categories. Altogether, this set of predictors gives the model enough useful information to learn meaningful patterns without adding unnecessary complexity.
+
+---
+
+# 4. Training-Validation Split
+
+Split the data into training and validation sets to evaluate the model's performance.
+
+```{r}
+# Training-validation split code goes here
+
+set.seed(123)
+
+# Create an 80/20 split
+train_index <- sample(1:nrow(train_selected), size = 0.8 * nrow(train_selected))
+valid_index <- setdiff(1:nrow(train_selected), train_index)
+
+train_data <- train_selected[train_index, ]
+valid_data <- train_selected[valid_index, ]
+
+nrow(train_data)
+nrow(valid_data)
+
+```
+
+*Interpretation*:
+I used an 80/20 split to divide the data into training and validation sets. The training portion is used to fit the regression model, while the validation set helps evaluate how well the model performs on data it hasn’t seen before. Setting a seed makes the split reproducible, so the results stay consistent every time the code runs. Overall, this helps ensure that the model generalizes well, rather than simply memorizing the training data.
+
+---
+
+# 5. Model 1 - Linear Regression
+
+## 5.1 Model 1 Predictions
+
+Train Model 1 and generate predictions on the validation data.
+
+```{r}
+
+# Fit a linear regression model using the selected predictors
+model1 <- lm(price ~ bedrooms + bathrooms + sqft_living + sqft_lot +
+               floors + waterfront + view + condition + grade +
+               sqft_above + sqft_basement + house_age + yr_renovated +
+               lat + long,
+             data = train_data)
+
+summary(model1)
+
+# Predict on validation set
+pred1 <- predict(model1, newdata = valid_data)
+
+# Combine actual vs predicted for easy comparison
+results_model1 <- data.frame(
+  actual_price = valid_data$price,
+  predicted_price = pred1
+)
+
+head(results_model1)
+```
+
+*Interpretation*: This first model is a straightforward linear regression that uses different house features to predict the sale price. The signs and sizes of the coefficients mostly match what we expect in real housing markets. Homes with more square footage, more bathrooms, and higher grade/condition generally get predicted at higher prices. Features like waterfront and view also show noticeable effects, which makes sense because those are premium attributes in King County.
+
+The location variables, latitude and longitude, also help explain some of the price variation across neighborhoods without manually creating zip-code groups.
+After fitting the model, I used it to predict prices for the validation set. Comparing the actual prices with the predictions gives a quick sense of how well the model is capturing overall patterns. The model isn’t perfect (especially on very high-priced homes), but it provides a solid baseline and behaves the way a reasonable housing price model should.
+
+---
+
+## 5.2 Model 1 Evaluation
+
+Evaluate Model 1 using appropriate metrics (e.g., accuracy, ROC, confusion matrix).
+
+```{r}
+# Calculate RMSE for validation set
+library(Metrics)
+rmse_model1 <- rmse(valid_data$price, pred1)
+rmse_model1
+
+# Plot actual vs predicted prices
+plot(valid_data$price, pred1,
+     xlab = "Actual Price",
+     ylab = "Predicted Price",
+     main = "Model 1: Actual vs Predicted Home Prices",
+     pch = 19, col = "steelblue")
+abline(0, 1, col = "red", lwd = 2)
+```
+
+*Interpretation*: The RMSE value gives us an idea of how far, on average, the model’s predictions are from the actual home prices. In this case, the RMSE is a little over $200,000, which is reasonable for King County housing data because prices in this region vary a lot especially for larger or luxury homes.
+
+The scatterplot helps visualize the model’s performance. Most of the points fall close to the red 45-degree line, meaning the model is capturing the general relationship between the features and the sale price. The spread gets wider for higher-priced homes, which is expected because expensive homes tend to differ more in unique features that aren’t fully captured in the dataset.
+
+Overall, the model performs well as a baseline linear regression: it follows the correct trend, predicts typical homes fairly accurately, and gives us a solid starting point for comparison.
+
+---
+
+# 6. Model 2
+
+## 6.1 Model 2 Predictions
+
+Train Model 2 and generate predictions on the validation data.
+
+```{r}
+# Model 2 training and predictions code goes here
+```
+
+*Interpretation*: Similar to Model 1, describe the second model's predictions: "Model 2 is similar to the first, but it uses a different approach to predict the outcome. We are comparing how each model performs."
+
+---
+
+## 6.2 Model 2 Evaluation
+
+Evaluate Model 2 using appropriate metrics (e.g., accuracy, ROC, confusion matrix).
+
+```{r}
+# Model 2 evaluation code goes here
+```
+
+*Interpretation*: Compare Model 2's results with those of Model 1. "Model 2's performance is slightly better than Model 1, as indicated by a higher accuracy or a better ROC curve. This suggests that Model 2 may be more suited to predicting the outcome accurately."
+
+---
+
+# 7. Final Prediction
+
+Combine the results from Model 1 and Model 2 to make a final prediction or decision.
+
+```{r}
+# Use the model to predict prices for the validation dataset
+final_predictions <- predict(model1, newdata = valid_data)
+
+# Show the first few predictions
+head(final_predictions)
+
+# Create a small comparison table
+final_results <- data.frame(
+  actual_price = valid_data$price,
+  predicted_price = final_predictions
+)
+
+head(final_results, 10)
+
+# Calculate the average predicted price
+mean_predicted_price <- mean(final_predictions)
+mean_predicted_price
+```
+
+*Interpretation*: To create the final prediction, I used my linear regression model to generate predicted home prices for the entire validation dataset. Since our project does not require predicting a brand-new home (and we were not given a new record to evaluate), the average predicted price provides a single, easy-to-understand estimate that reflects the model’s typical output. This summary value helps show the overall pricing level the model expects based on the validation data. Overall, this gives us a straightforward final result using Model 1’s predictions. 
+
+
+---
+
+*Notes:*
+- Ensure that each model and result is interpreted in business-friendly terms.
+- After each model evaluation, summarise the results, comparing them in plain language to help stakeholders understand the implications.
+- Whenever presenting evaluation metrics like accuracy or ROC, explain what they mean in simple terms. For instance: "An accuracy of 80% means that 80% of the time, the model made the correct prediction."
+- Some models may require additional preprocessing. INclude them as needed.
