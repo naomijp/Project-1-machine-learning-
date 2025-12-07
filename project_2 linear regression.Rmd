@@ -309,7 +309,7 @@ final_prices_table <- data.frame(
 final_prices_table
 ```
 
-*Interpretation*: To create the final prediction, I used my linear regression model to generate predicted home prices for the entire validation dataset. Since our project does not require predicting a brand-new home (and we were not given a new record to evaluate), the average predicted price provides a single, easy-to-understand estimate that reflects the model’s typical output. This summary value helps show the overall pricing level the model expects based on the validation data. Overall, this gives us a straightforward final result using Model 1’s predictions. 
+*Interpretation*: To create the final prediction, I used our linear regression model to generate price estimates for both the validation set and the new homes in the test dataset. The validation predictions helped confirm that the model behaves reasonably, and the test-set predictions give us the final prices we would submit. The summary statistic (average predicted price) provides a quick sense of the model’s overall pricing level, while the final output table shows the estimated value for each of the new homes.
 
 
 ---
