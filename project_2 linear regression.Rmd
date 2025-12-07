@@ -260,23 +260,53 @@ Evaluate Model 2 using appropriate metrics (e.g., accuracy, ROC, confusion matri
 Combine the results from Model 1 and Model 2 to make a final prediction or decision.
 
 ```{r}
-# Use the model to predict prices for the validation dataset
-final_predictions <- predict(model1, newdata = valid_data)
+# We make two sets of predictions:
+# 1. Predictions for the validation dataset
+# 2. Predictions for the new houses in the test dataset
 
-# Show the first few predictions
-head(final_predictions)
 
-# Create a small comparison table
-final_results <- data.frame(
+# --- 7.1 Predict prices for the validation dataset ---
+valid_predictions <- predict(model1, newdata = valid_data)
+
+# Show first few predictions
+head(valid_predictions)
+
+# --- 7.2 Create comparison table (actual vs predicted) ---
+validation_results <- data.frame(
   actual_price = valid_data$price,
-  predicted_price = final_predictions
+  predicted_price = valid_predictions
 )
 
-head(final_results, 10)
+head(validation_results, 10)
 
-# Calculate the average predicted price
-mean_predicted_price <- mean(final_predictions)
+# --- 7.3 Average predicted price (just a simple summary) ---
+mean_predicted_price <- mean(valid_predictions)
 mean_predicted_price
+
+# --- 7.4 Predict prices for the NEW houses (test dataset) ---
+
+# Ensure test_df categorical variables match the TRAINING data types
+test_df$waterfront <- as.factor(test_df$waterfront)
+test_df$view       <- as.factor(test_df$view)
+test_df$condition  <- as.factor(test_df$condition)
+test_df$grade      <- as.factor(test_df$grade)
+
+test_df$house_age <- 2015 - test_df$yr_built
+
+# Now predict
+final_house_predictions <- predict(model1, newdata = test_df)
+
+# Show first few predicted prices
+head(final_house_predictions)
+
+
+# --- 7.5 Create the final output table for submission ---
+final_prices_table <- data.frame(
+  house_id = test_df$id,
+  predicted_price = final_house_predictions
+)
+
+final_prices_table
 ```
 
 *Interpretation*: To create the final prediction, I used my linear regression model to generate predicted home prices for the entire validation dataset. Since our project does not require predicting a brand-new home (and we were not given a new record to evaluate), the average predicted price provides a single, easy-to-understand estimate that reflects the model’s typical output. This summary value helps show the overall pricing level the model expects based on the validation data. Overall, this gives us a straightforward final result using Model 1’s predictions. 
